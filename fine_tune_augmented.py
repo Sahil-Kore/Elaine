@@ -1,13 +1,21 @@
-import os
 import torch
-import torch.nn as nn 
-import torch.functional as F
+import torch.nn as nn
+from torchvision import models
+from PIL import Image
+import io
 from torchvision import datasets, transforms, models
-from torch.utils.data import DataLoader, random_split
 from torch.utils.data import Subset
-import numpy as np
-import matplotlib.pyplot as plt
-from torchinfo import summary
+from torch.utils.data import DataLoader, random_split
+import os
+checkpoint = torch.load('./Models/model_bundle.pth',map_location="cpu", weights_only=False)
+model = models.resnet34(pretrained=False)
+model.fc = nn.Linear(model.fc.in_features , 3)
+
+state_dict = checkpoint["model_state_dict"]
+model.load_state_dict(state_dict)
+transform = checkpoint["transform"]
+idx_to_classes= checkpoint["idx_to_classes"]
+
 train_transform = transforms.Compose([
     transforms.Grayscale(num_output_channels=3),
     transforms.Resize((256,256)),
@@ -44,41 +52,6 @@ num_workers = os.cpu_count() - 4  # leave some CPU for system
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=num_workers)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False, num_workers=num_workers)
 
-class_names=base_dataset.classes
-idx_to_classes = {v:k for k,v in base_dataset.class_to_idx.items()}
-
-device ="cuda" if torch.cuda.is_available() else "cpu"
-
-def imshow(img:torch.Tensor, label = None):
-    inp =img.permute(1,2,0)
-    mean=np.array([0.485, 0.456, 0.406])
-    std=np.array([0.229, 0.224, 0.225])
-    inp= inp * std +mean
-    inp = np.clip(inp,0 ,1)
-    plt.imshow(inp)
-    if label:
-        plt.title(idx_to_classes[label])
-    plt.pause(0.001)
-
-
-count=1
-
-for image,label in train_dataset:
-    imshow(image,label)
-    if count==10:break
-    count+=1
-
-
-model =models.resnet34(pretrained = True)
-summary(model, input_size=(1, 3, 224, 224),verbose=2)
-
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-count_parameters(model)
-model.parameters
-model.fc
-model.fc= nn.Linear(in_features=512,out_features= len(class_names))
 
 save_loss = {'train': [], 'test': []}
 save_acc = {'train': [], 'test': []}
@@ -88,14 +61,16 @@ for param in model.parameters():
 for param in model.fc.parameters():
     param.requires_grad = True
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
 torch.set_float32_matmul_precision("high")  
 model = model.to(device)
 
 criterion = torch.nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.fc.parameters(), lr=1e-4)
 model = torch.compile(model)  # optional, only if PyTorch 2.0+
+epochs =20
 #Training loop
-for epoch in range(50):
+for epoch in range(epochs):
     # --- TRAIN ---
     model.train()
     running_loss = 0.0
@@ -145,7 +120,7 @@ for epoch in range(50):
     save_acc['train'].append(epoch_train_acc)
     save_acc['test'].append(epoch_val_acc)
 
-    print(f"Epoch [{epoch+1}/50] "
+    print(f"Epoch [{epoch+1}/{epochs}] "
           f"Train Loss: {epoch_train_loss:.4f} | Train Acc: {epoch_train_acc:.4f} "
           f"Val Loss: {epoch_val_loss:.4f} | Val Acc: {epoch_val_acc:.4f}")
     
@@ -154,15 +129,18 @@ if hasattr(model , "_orig_mod"):
     model_to_save = model._orig_mod
 else:
     model_to_save =model
-    
+
+
 torch.save({
     "model_state_dict":model_to_save.state_dict(),
     "transform": val_transform,
     "idx_to_classes":idx_to_classes
-    },"./Models/model_bundle_kaggle2.0.pth")    
+    },"./Models/model_bundle_kaggle2.pth")    
+
+    
 
 from PIL import Image
-img_dir = "./RockPaperScissors/Scissors"
+img_dir = "./Test"
 model.eval()
 with torch.no_grad():
         for file_name in os.listdir(img_dir):
